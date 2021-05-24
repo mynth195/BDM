@@ -1,0 +1,232 @@
+### Importing required library
+import pandas as pd
+import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
+from sklearn.model_selection import GridSearchCV,train_test_split
+from sklearn.metrics import accuracy_score
+from sklearn.metrics import classification_report
+import re
+import string
+
+### Authentication for Google Drive
+from google.colab import drive
+drive.mount('/content/drive')
+
+url_fake = "/content/drive/MyDrive/data/Fake.csv"
+url_true ="/content/drive/MyDrive/data/True.csv"
+
+df_fake = pd.read_csv(url_fake)
+df_true = pd.read_csv(url_true)
+
+df_fake.head(10)
+
+df_true.isnull().sum()
+
+### Inserting a column called "class" for fake and real news dataset to categories fake and true news. 
+df_fake["class"] = 0
+df_true["class"] = 1
+
+### Removing HEAD 5 rows from both the dataset, for manual testing 
+df_fake.shape, df_true.shape
+df_fake_manual_testing = df_fake.head(10)
+for i in range(2,8,1):
+    df_fake.drop([i], axis = 0, inplace = True)
+df_true_manual_testing = df_true.head(5)
+for i in range(2,8,1):
+    df_true.drop([i], axis = 0, inplace = True)
+df_fake.shape, df_true.shape
+
+###Merging the manual testing dataframe in single dataset and save it in a csv file
+df_fake_manual_testing["class"] = 0
+df_true_manual_testing["class"] = 1
+
+df_fake_manual_testing.head(10)
+df_true_manual_testing.head(10)
+
+url_test = "manual_testing.csv"
+df_manual_testing = pd.concat([df_fake_manual_testing,df_true_manual_testing], axis = 0)
+df_manual_testing.to_csv(url_test)
+
+#Merging the main fake and true dataframe
+df_marge = pd.concat([df_fake, df_true], axis =0 )
+df_marge.head(10)
+df_marge.columns
+
+# How many articles per subject?
+print(df_marge.groupby(['subject'])['text'].count())
+df_marge.groupby(['subject'])['text'].count().plot(kind="bar")
+plt.show()
+
+#### "title",  "subject" and "date" columns is not required for detecting the fake news, so I am going to drop the columns.
+df = df_marge.drop(["title", "subject","date"], axis = 1)
+df.isnull().sum()
+
+#### Randomly shuffling the dataframe 
+df = df.sample(frac = 1)
+df.head()
+df.reset_index(inplace = True)
+df.drop(["index"], axis = 1, inplace = True)
+df.columns
+df.head()
+
+# Creating a function to convert the text in lowercase, remove the extra space, 
+def wordopt(text):
+    text = text.lower()
+    text = re.sub('\[.*?\]', '', text)
+    text = re.sub("\\W"," ",text) 
+    text = re.sub('https?://\S+|www\.\S+', '', text)
+    text = re.sub('<.*?>+', '', text)
+    text = re.sub('[%s]' % re.escape(string.punctuation), '', text)
+    text = re.sub('\n', '', text)
+    text = re.sub('\w*\d\w*', '', text)    
+    return text
+df["text"] = df["text"].apply(wordopt)
+
+# How many fake and real articles?
+print(df.groupby(['class'])['text'].count())
+df.groupby(['class'])['text'].count().plot(kind="bar")
+plt.show()
+
+print(df.groupby(['class'])['text'].count())
+df.groupby(['class'])['text'].count().plot(kind="bar")
+plt.show()
+
+from nltk import tokenize
+
+token_space = tokenize.WhitespaceTokenizer()
+
+def counter(text, column_text, quantity):
+    all_words = ' '.join([text for text in text[column_text]])
+    token_phrase = token_space.tokenize(all_words)
+    frequency = nltk.FreqDist(token_phrase)
+    df_frequency = pd.DataFrame({"Word": list(frequency.keys()),
+                                   "Frequency": list(frequency.values())})
+    df_frequency = df_frequency.nlargest(columns = "Frequency", n = quantity)
+    plt.figure(figsize=(12,8))
+    ax = sns.barplot(data = df_frequency, x = "Word", y = "Frequency", color = 'blue')
+    ax.set(ylabel = "Count")
+    plt.xticks(rotation='vertical')
+    plt.show()
+    
+counter(df[df["class"] == 0], "text", 20)
+    
+counter(df[df["class"] == 1], "text", 20)
+    
+#### Defining dependent and independent variable as x and y
+x = df["text"]
+y = df["class"]
+
+#### Splitting the dataset into training set and testing set. 
+x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.2,random_state=42)
+
+#### Convert text to vectors
+from sklearn.feature_extraction.text import TfidfVectorizer
+vectorization = TfidfVectorizer()
+xv_train = vectorization.fit_transform(x_train)
+xv_test = vectorization.transform(x_test)
+
+from sklearn import metrics
+import itertools
+
+def plot_confusion_matrix(cm, classes,
+                          normalize=False,
+                          title='Confusion matrix',
+                          cmap=plt.cm.Blues):
+    
+    plt.imshow(cm, interpolation='nearest', cmap=cmap)
+    plt.title(title)
+    plt.colorbar()
+    tick_marks = np.arange(len(classes))
+    plt.xticks(tick_marks, classes, rotation=45)
+    plt.yticks(tick_marks, classes)
+
+    if normalize:
+        cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
+        print("Normalized confusion matrix")
+    else:
+        print('Confusion matrix, without normalization')
+
+    thresh = cm.max() / 2.
+    for i, j in itertools.product(range(cm.shape[0]), range(cm.shape[1])):
+        plt.text(j, i, cm[i, j],
+                 horizontalalignment="center",
+                 color="white" if cm[i, j] > thresh else "black")
+
+    plt.tight_layout()
+    plt.ylabel('True label')
+    plt.xlabel('Predicted label')
+
+### 1. Logistic Regression
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import GridSearchCV
+clf = LogisticRegression()
+grid_values = {'penalty': ['l2'],'C':[0.001,.009,0.01, 0.08]}
+grid_clf_acc = GridSearchCV(clf, param_grid = grid_values,scoring = 'recall')
+grid_clf_acc.fit(xv_train, y_train)
+
+print(grid_clf_acc.best_estimator_)
+
+y_pred_acc = grid_clf_acc.predict(xv_test)
+grid_clf_acc.score(xv_test, y_test)
+
+grid_clf_acc.best_params_
+
+clf.fit(xv_train, y_train)
+
+pred_lr=clf.predict(xv_test)
+clf.score(xv_test, y_test)
+print(classification_report(y_test, y_pred_acc))
+
+cm = metrics.confusion_matrix(y_test, y_pred_acc)
+plot_confusion_matrix(cm, classes=['Fake', 'Real'])
+
+### 2. Decision Tree Classification
+from sklearn.tree import DecisionTreeClassifier
+DT = DecisionTreeClassifier(ccp_alpha=0.0, criterion='gini', max_depth=20, 
+                        min_impurity_decrease=0.0,
+                        min_samples_leaf=1, min_samples_split=2,
+                        min_weight_fraction_leaf=0.5, presort='deprecated',
+                        splitter='best',
+                        random_state=20)
+
+DT.fit(xv_train, y_train)
+pred_dt = DT.predict(xv_test)
+print("accuracy: {}%".format(round(accuracy_score(y_test, pred_dt)*100,2)))
+print(classification_report(y_test, pred_dt))
+cm = metrics.confusion_matrix(y_test, pred_dt)
+plot_confusion_matrix(cm, classes=['Fake', 'Real'])
+
+### 3. K- Nearest Neighbor Classifier
+from sklearn.neighbors import KNeighborsClassifier
+KNN =  KNeighborsClassifier(n_neighbors = 1)
+KNN.fit(xv_train, y_train)
+pred_knn = KNN.predict(xv_test)
+print("accuracy: {}%".format(round(accuracy_score(y_test, pred_knn)*100,2)))
+print(classification_report(y_test, pred_knn))
+cm = metrics.confusion_matrix(y_test, pred_knn)
+plot_confusion_matrix(cm, classes=['Fake', 'Real'])
+
+# Model Testing With Manual Entry
+def output_lable(n):
+    if n == 0:
+        return "Fake News"
+    elif n == 1:
+        return "Not A Fake News"
+    
+def manual_testing(news):
+    testing_news = {"text":[news]}
+    new_def_test = pd.DataFrame(testing_news)
+    new_def_test["text"] = new_def_test["text"].apply(wordopt) 
+    new_x_test = new_def_test["text"]
+    new_xv_test = vectorization.transform(new_x_test)
+    pred_LR = clf.predict(new_xv_test)
+    pred_DT = DT.predict(new_xv_test)
+    pred_KNN = KNN.predict(new_xv_test)
+
+    return print("\n\nLR Prediction: {} \nDT Prediction: {} \nKNN Prediction: {}".format(output_lable(pred_LR[0]), 
+                                                                                                              output_lable(pred_DT[0]), 
+                                                                                                              output_lable(pred_KNN[0])))
+                                                                                        
+news = str(input())
+manual_testing(news)
